@@ -8,9 +8,12 @@ import scipy.misc
 import scipy.io as sio
 import cv2
 from glob import glob
+from tqdm import tqdm
 os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import tensorflow as tf
+
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 import numpy as np
 from PIL import Image
 from utils import *
@@ -21,8 +24,9 @@ LIST_PATH = './datasets/CIHP/list/val.txt'
 DATA_ID_LIST = './datasets/CIHP/list/val_id.txt'
 RESTORE_FROM = './checkpoint/CIHP_pgn'
 
-def main(data_dir=DATA_DIR, list_path=LIST_PATH, data_id_list=DATA_ID_LIST):
+def main(data_dir=DATA_DIR, list_path=LIST_PATH, out_dir="output"):
     """Create the model and start the evaluation process."""
+    data_id_list = list_path
     with open(data_id_list, 'r') as f:
         num_steps = len(f.readlines())
 
@@ -31,13 +35,14 @@ def main(data_dir=DATA_DIR, list_path=LIST_PATH, data_id_list=DATA_ID_LIST):
     # Load reader.
     with tf.name_scope("create_inputs"):
         reader = ImageReader(data_dir, list_path, data_id_list, None, False, False, False, coord)
-        image, label, edge_gt = reader.image, reader.label, reader.edge
+        # image, label, edge_gt = reader.image, reader.label, reader.edge
+        image = reader.image
         image_rev = tf.reverse(image, tf.stack([1]))
         image_list = reader.image_list
 
     image_batch = tf.stack([image, image_rev])
-    label_batch = tf.expand_dims(label, dim=0) # Add one batch dimension.
-    edge_gt_batch = tf.expand_dims(edge_gt, dim=0)
+    # label_batch = tf.expand_dims(label, dim=0) # Add one batch dimension.
+    # edge_gt_batch = tf.expand_dims(edge_gt, dim=0)
     h_orig, w_orig = tf.to_float(tf.shape(image_batch)[1]), tf.to_float(tf.shape(image_batch)[2])
     image_batch050 = tf.image.resize_images(image_batch, tf.stack([tf.to_int32(tf.multiply(h_orig, 0.50)), tf.to_int32(tf.multiply(w_orig, 0.50))]))
     image_batch075 = tf.image.resize_images(image_batch, tf.stack([tf.to_int32(tf.multiply(h_orig, 0.75)), tf.to_int32(tf.multiply(w_orig, 0.75))]))
@@ -135,16 +140,16 @@ def main(data_dir=DATA_DIR, list_path=LIST_PATH, data_id_list=DATA_ID_LIST):
 
     # prepare ground truth 
     preds = tf.reshape(pred_all, [-1,])
-    gt = tf.reshape(label_batch, [-1,])
-    weights = tf.cast(tf.less_equal(gt, N_CLASSES - 1), tf.int32) # Ignoring all labels greater than or equal to n_classes.
-    mIoU, update_op_iou = tf.contrib.metrics.streaming_mean_iou(preds, gt, num_classes=N_CLASSES, weights=weights)
-    macc, update_op_acc = tf.contrib.metrics.streaming_accuracy(preds, gt, weights=weights)
+    # gt = tf.reshape(label_batch, [-1,])
+    # weights = tf.cast(tf.less_equal(gt, N_CLASSES - 1), tf.int32) # Ignoring all labels greater than or equal to n_classes.
+    # mIoU, update_op_iou = tf.contrib.metrics.streaming_mean_iou(preds, gt, num_classes=N_CLASSES, weights=weights)
+    # macc, update_op_acc = tf.contrib.metrics.streaming_accuracy(preds, gt, weights=weights)
 
     # precision and recall
-    recall, update_op_recall = tf.contrib.metrics.streaming_recall(res_edge, edge_gt_batch)
-    precision, update_op_precision = tf.contrib.metrics.streaming_precision(res_edge, edge_gt_batch)
-
-    update_op = tf.group(update_op_iou, update_op_acc, update_op_recall, update_op_precision)
+    # recall, update_op_recall = tf.contrib.metrics.streaming_recall(res_edge, edge_gt_batch)
+    # precision, update_op_precision = tf.contrib.metrics.streaming_precision(res_edge, edge_gt_batch)
+    #
+    # update_op = tf.group(update_op_iou, update_op_acc, update_op_recall, update_op_precision)
 
     # Which variables to load.
     restore_var = tf.global_variables()
@@ -169,18 +174,15 @@ def main(data_dir=DATA_DIR, list_path=LIST_PATH, data_id_list=DATA_ID_LIST):
     threads = tf.train.start_queue_runners(coord=coord, sess=sess)
 
     # evaluate prosessing
-    parsing_dir = './output/cihp_parsing_maps'
+    parsing_dir = f"{out_dir}/cihp_parsing_maps"
     if not os.path.exists(parsing_dir):
         os.makedirs(parsing_dir)
     # edge_dir = './output/cihp_edge_maps'
     # if not os.path.exists(edge_dir):
     #     os.makedirs(edge_dir)
-    # Iterate over training steps.
-    for step in range(num_steps):
-        parsing_, scores, edge_, _ = sess.run([pred_all, pred_scores, pred_edge, update_op])
-        if step % 100 == 0:
-            print('step {:d}'.format(step))
-            print (image_list[step])
+    # Iterate over test steps.
+    for step in tqdm(range(num_steps)):
+        parsing_ = sess.run(pred_all)
         img_split = image_list[step].split('/')
         # img_id = img_split[-1][:-4]  # except extension
         # /path/to/datadir/subfolder1/subfolder2/hi.png --> hi
@@ -195,27 +197,46 @@ def main(data_dir=DATA_DIR, list_path=LIST_PATH, data_id_list=DATA_ID_LIST):
         os.makedirs(os.path.dirname(parsing_im_out), exist_ok=True)
         parsing_im.save(parsing_im_out)
         thing = os.path.join(parsing_dir, img_id.lstrip("/") + ".png")
-        os.makedirs(os.path.dirname(thing), exist_ok=True)
-        cv2.imwrite(thing, parsing_[0, :, :, 0])
+        # cv2.imwrite(thing, parsing_[0, :, :, 0])
         # sio.savemat('{}/{}.mat'.format(parsing_dir, img_id), {'data': scores[0,:,:]})
         
         # cv2.imwrite('{}/{}.png'.format(edge_dir, img_id), edge_[0,:,:,0] * 255)
 
-    res_mIou = mIoU.eval(session=sess)
-    res_macc = macc.eval(session=sess)
-    res_recall = recall.eval(session=sess)
-    res_precision = precision.eval(session=sess)
-    f1 = 2 * res_precision * res_recall / (res_precision + res_recall)
-    print('Mean IoU: {:.4f}, Mean Acc: {:.4f}'.format(res_mIou, res_macc))
-    print('Recall: {:.4f}, Precision: {:.4f}, F1 score: {:.4f}'.format(res_recall, res_precision, f1))
+    # res_mIou = mIoU.eval(session=sess)
+    # res_macc = macc.eval(session=sess)
+    # res_recall = recall.eval(session=sess)
+    # res_precision = precision.eval(session=sess)
+    # f1 = 2 * res_precision * res_recall / (res_precision + res_recall)
+    # print('Mean IoU: {:.4f}, Mean Acc: {:.4f}'.format(res_mIou, res_macc))
+    # print('Recall: {:.4f}, Precision: {:.4f}, F1 score: {:.4f}'.format(res_recall, res_precision, f1))
 
     coord.request_stop()
     coord.join(threads)
-    
+
+
+
+def paths_to_file(paths, out_file):
+    with open(out_file, "w") as f:
+        for p in paths:
+            f.write(p + "\n")
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    import glob
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", default=DATA_DIR + "/images")
+    parser.add_argument("--out_dir", default="output")
+    args = parser.parse_args()
+
+    path = args.data_dir
+    image_paths = glob.glob(f"{path}/**/*.png")
+    print(f"Found {len(image_paths)} images")
+    image_paths = [p[len(path):] for p in image_paths]
+
+    image_file_list = path + "/_list.txt"
+    paths_to_file(image_paths, image_file_list)
+    main(args.data_dir, image_file_list, args.out_dir)
 
 
 ##############################################################333

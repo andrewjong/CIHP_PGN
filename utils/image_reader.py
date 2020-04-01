@@ -7,7 +7,7 @@ import random
 IGNORE_LABEL = 255
 IMG_MEAN = np.array((125.0, 114.4, 107.9), dtype=np.float32)
 
-def image_scaling(img, label, edge):
+def image_scaling(img):
     """
     Randomly scales the images between 0.5 to 1.5 times the original size.
     Args:
@@ -20,14 +20,10 @@ def image_scaling(img, label, edge):
     w_new = tf.to_int32(tf.multiply(tf.to_float(tf.shape(img)[1]), scale))
     new_shape = tf.squeeze(tf.stack([h_new, w_new]), squeeze_dims=[1])
     img = tf.image.resize_images(img, new_shape)
-    label = tf.image.resize_nearest_neighbor(tf.expand_dims(label, 0), new_shape)
-    label = tf.squeeze(label, squeeze_dims=[0])
-    edge = tf.image.resize_nearest_neighbor(tf.expand_dims(edge, 0), new_shape)
-    edge = tf.squeeze(edge, squeeze_dims=[0])
-   
-    return img, label, edge
 
-def image_mirroring(img, label, edge):
+    return img
+
+def image_mirroring(img):
     """
     Randomly mirrors the images.
     Args:
@@ -39,9 +35,7 @@ def image_mirroring(img, label, edge):
     mirror = tf.less(tf.stack([1.0, distort_left_right_random, 1.0]), 0.5)
     mirror = tf.boolean_mask([0, 1, 2], mirror)
     img = tf.reverse(img, mirror)
-    label = tf.reverse(label, mirror)
-    edge = tf.reverse(edge, mirror)
-    return img, label, edge
+    return img
 
 def random_resize_img_labels(image, label, resized_h, resized_w):
 
@@ -101,6 +95,7 @@ def random_crop_and_pad_image_and_labels(image, label, edge, crop_h, crop_w, ign
     return img_crop, label_crop, edge_crop
 
 
+from os.path import normpath
 def read_labeled_image_reverse_list(data_dir, data_list):
     """Reads txt file containing paths to images and ground truth masks.
     
@@ -120,9 +115,9 @@ def read_labeled_image_reverse_list(data_dir, data_list):
             image, mask, mask_rev = line.strip("\n").split(' ')
         except ValueError: # Adhoc for test.
             image = mask = mask_rev = line.strip("\n")
-        images.append(data_dir + image)
-        masks.append(data_dir + mask)
-        masks_rev.append(data_dir + mask_rev)
+        images.append(normpath(data_dir + image))
+        masks.append(normpath(data_dir + mask))
+        masks_rev.append(normpath(data_dir + mask_rev))
     return images, masks, masks_rev
 
 
@@ -144,8 +139,8 @@ def read_labeled_image_list(data_dir, data_list):
             image, mask = line.strip("\n").split(' ')
         except ValueError: # Adhoc for test.
             image = mask = line.strip("\n")
-        images.append(data_dir + image)
-        masks.append(data_dir + mask)
+        images.append(normpath(data_dir + image))
+        masks.append(normpath(data_dir + mask))
     return images, masks
 
 def read_edge_list(data_dir, data_id_list):
@@ -153,7 +148,7 @@ def read_edge_list(data_dir, data_id_list):
     edges = []
     for line in f:
         edge = line.strip("\n")
-        edges.append(data_dir + '/edges/' + edge + '.png')
+        edges.append(normpath(data_dir + '/edges/' + edge + '.png'))
     return edges
 
 def read_images_from_disk(input_queue, input_size, random_scale, random_mirror=False): # optional pre-processing arguments
@@ -173,8 +168,8 @@ def read_images_from_disk(input_queue, input_size, random_scale, random_mirror=F
     """
 
     img_contents = tf.read_file(input_queue[0])
-    label_contents = tf.read_file(input_queue[1])
-    edge_contents = tf.read_file(input_queue[2])
+    # label_contents = tf.read_file(input_queue[1])
+    # edge_contents = tf.read_file(input_queue[2])
 
     
     img = tf.image.decode_jpeg(img_contents, channels=3)
@@ -182,25 +177,25 @@ def read_images_from_disk(input_queue, input_size, random_scale, random_mirror=F
     img = tf.cast(tf.concat([img_b, img_g, img_r], 2), dtype=tf.float32)
     # Extract mean.
     img -= IMG_MEAN
-    label = tf.image.decode_png(label_contents, channels=1)
-    edge = tf.image.decode_png(edge_contents, channels=1)
+    # label = tf.image.decode_png(label_contents, channels=1)
+    # edge = tf.image.decode_png(edge_contents, channels=1)
 
-    if input_size is not None:
-        h, w = input_size
-
-        # Randomly scale the images and labels.
-        if random_scale:
-            img, label, edge = image_scaling(img, label, edge)
-
-        # Randomly mirror the images and labels.
-        if random_mirror:
-            img, label, edge = image_mirroring(img, label, edge)
-
+    # if input_size is not None:
+    #     h, w = input_size
+    #
+    #     # Randomly scale the images and labels.
+    #     if random_scale:
+    #         img, label, edge = image_scaling(img)
+    #
+    #     # Randomly mirror the images and labels.
+    #     if random_mirror:
+    #         img, label, edge = image_mirroring(img)
+    #
         # Randomly crops the images and labels.
-        img, label, edge = random_crop_and_pad_image_and_labels(img, label, edge, h, w, IGNORE_LABEL)
+        # img, label, edge = random_crop_and_pad_image_and_labels(img, label, edge, h, w, IGNORE_LABEL)
 
 
-    return img, label, edge
+    return img
 
 class ImageReader(object):
     '''Generic ImageReader which reads images and corresponding segmentation
@@ -228,12 +223,12 @@ class ImageReader(object):
 
 
         self.image_list, self.label_list = read_labeled_image_list(self.data_dir, self.data_list)
-        self.edge_list = read_edge_list(self.data_dir, self.data_id_list)
+        # self.edge_list = read_edge_list(self.data_dir, self.data_id_list)
         self.images = tf.convert_to_tensor(self.image_list, dtype=tf.string)
-        self.labels = tf.convert_to_tensor(self.label_list, dtype=tf.string)
-        self.edges = tf.convert_to_tensor(self.edge_list, dtype=tf.string)
-        self.queue = tf.train.slice_input_producer([self.images, self.labels, self.edges], shuffle=shuffle) 
-        self.image, self.label, self.edge = read_images_from_disk(self.queue, self.input_size, random_scale, random_mirror) 
+        # self.labels = tf.convert_to_tensor(self.label_list, dtype=tf.string)
+        # self.edges = tf.convert_to_tensor(self.edge_list, dtype=tf.string)
+        self.queue = tf.train.slice_input_producer([self.images], shuffle=shuffle)
+        self.image = read_images_from_disk(self.queue, self.input_size, random_scale, random_mirror)
 
     def dequeue(self, num_elements):
         '''Pack images and labels into a batch.
@@ -243,6 +238,5 @@ class ImageReader(object):
           
         Returns:
           Two tensors of size (batch_size, h, w, {3, 1}) for images and masks.'''
-        batch_list = [self.image, self.label, self.edge]
-        image_batch, label_batch, edge_batch = tf.train.batch([self.image, self.label, self.edge], num_elements)
-        return image_batch, label_batch, edge_batch
+        image_batch = tf.train.batch([self.image], num_elements)
+        return image_batch
