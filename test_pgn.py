@@ -19,18 +19,18 @@ N_CLASSES = 20
 DATA_DIR = './datasets/CIHP'
 LIST_PATH = './datasets/CIHP/list/val.txt'
 DATA_ID_LIST = './datasets/CIHP/list/val_id.txt'
-with open(DATA_ID_LIST, 'r') as f:
-    NUM_STEPS = len(f.readlines()) 
 RESTORE_FROM = './checkpoint/CIHP_pgn'
 
-def main():
+def main(data_dir=DATA_DIR, list_path=LIST_PATH, data_id_list=DATA_ID_LIST):
     """Create the model and start the evaluation process."""
-    
-    # Create queue coordinator.
+    with open(data_id_list, 'r') as f:
+        num_steps = len(f.readlines())
+
+        # Create queue coordinator.
     coord = tf.train.Coordinator()
     # Load reader.
     with tf.name_scope("create_inputs"):
-        reader = ImageReader(DATA_DIR, LIST_PATH, DATA_ID_LIST, None, False, False, False, coord)
+        reader = ImageReader(data_dir, list_path, data_id_list, None, False, False, False, coord)
         image, label, edge_gt = reader.image, reader.label, reader.edge
         image_rev = tf.reverse(image, tf.stack([1]))
         image_list = reader.image_list
@@ -107,7 +107,7 @@ def main():
     head_output, tail_output = tf.unstack(raw_output, num=2, axis=0)
     tail_list = tf.unstack(tail_output, num=20, axis=2)
     tail_list_rev = [None] * 20
-    for xx in xrange(14):
+    for xx in range(14):
         tail_list_rev[xx] = tail_list[xx]
     tail_list_rev[14] = tail_list[15]
     tail_list_rev[15] = tail_list[14]
@@ -172,25 +172,34 @@ def main():
     parsing_dir = './output/cihp_parsing_maps'
     if not os.path.exists(parsing_dir):
         os.makedirs(parsing_dir)
-    edge_dir = './output/cihp_edge_maps'
-    if not os.path.exists(edge_dir):
-        os.makedirs(edge_dir)
+    # edge_dir = './output/cihp_edge_maps'
+    # if not os.path.exists(edge_dir):
+    #     os.makedirs(edge_dir)
     # Iterate over training steps.
-    for step in range(NUM_STEPS):
+    for step in range(num_steps):
         parsing_, scores, edge_, _ = sess.run([pred_all, pred_scores, pred_edge, update_op])
         if step % 100 == 0:
             print('step {:d}'.format(step))
             print (image_list[step])
         img_split = image_list[step].split('/')
-        img_id = img_split[-1][:-4]
-        
+        # img_id = img_split[-1][:-4]  # except extension
+        # /path/to/datadir/subfolder1/subfolder2/hi.png --> hi
+        # but we want to keep the same folder structure so...
+        # remove the top and the extension
+        # subfolder1/subfolder2/hi
+        img_id = image_list[step][len(data_dir):][:-4]
+
         msk = decode_labels(parsing_, num_classes=N_CLASSES)
         parsing_im = Image.fromarray(msk[0])
-        parsing_im.save('{}/{}_vis.png'.format(parsing_dir, img_id))
-        cv2.imwrite('{}/{}.png'.format(parsing_dir, img_id), parsing_[0,:,:,0])
-        sio.savemat('{}/{}.mat'.format(parsing_dir, img_id), {'data': scores[0,:,:]})
+        parsing_im_out = os.path.join(parsing_dir, img_id.lstrip("/") + "_vis.png")
+        os.makedirs(os.path.dirname(parsing_im_out), exist_ok=True)
+        parsing_im.save(parsing_im_out)
+        thing = os.path.join(parsing_dir, img_id.lstrip("/") + ".png")
+        os.makedirs(os.path.dirname(thing), exist_ok=True)
+        cv2.imwrite(thing, parsing_[0, :, :, 0])
+        # sio.savemat('{}/{}.mat'.format(parsing_dir, img_id), {'data': scores[0,:,:]})
         
-        cv2.imwrite('{}/{}.png'.format(edge_dir, img_id), edge_[0,:,:,0] * 255)
+        # cv2.imwrite('{}/{}.png'.format(edge_dir, img_id), edge_[0,:,:,0] * 255)
 
     res_mIou = mIoU.eval(session=sess)
     res_macc = macc.eval(session=sess)
