@@ -197,7 +197,7 @@ def main(data_dir=DATA_DIR, list_path=LIST_PATH, out_dir="output"):
         os.makedirs(os.path.dirname(parsing_im_out), exist_ok=True)
         parsing_im.save(parsing_im_out)
         thing = os.path.join(parsing_dir, img_id.lstrip("/") + ".png")
-        # cv2.imwrite(thing, parsing_[0, :, :, 0])
+        # cv2.imwrite(thing, parsing_[0, :, :, 0]) # saves a flat map
         # sio.savemat('{}/{}.mat'.format(parsing_dir, img_id), {'data': scores[0,:,:]})
         
         # cv2.imwrite('{}/{}.png'.format(edge_dir, img_id), edge_[0,:,:,0] * 255)
